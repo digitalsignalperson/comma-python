@@ -30,8 +30,8 @@ New kernel (and kill any existing) and execute command:
 - in fish, recommend using Alt+E to edit your ,python command!
     - an experience a little bit closer to a Notebook cell or QtConsole prompt
     - Try with this micro editor config: `set -U EDITOR "micro -wordwrap true -softwrap true -autosave 9999999"`
-      - with the benefits of a mouse and Ctrl+C & Ctrl+V in micro.
-      - where Ctrl+Q exits with the command changes saved automatically
+        - with the benefits of a mouse and Ctrl+C & Ctrl+V in micro.
+        - where Ctrl+Q exits with the command changes saved automatically
 
 
 # Examples:
@@ -54,7 +54,11 @@ for i, (a, b) in enumerate(pairs):
 
 ,python "x=1"
 ,python "print(x)"
+# This also shows the repr():
 ,python "x"
+
+# also ipython magic commands work, e.g.
+,python "files = !ls"
 ```
 
 
