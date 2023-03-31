@@ -122,7 +122,10 @@ if os.path.exists(connection_pid_path):
     except ProcessLookupError:
         kernel_exists = False
     else:
-        kernel_exists = True
+        # pid exists, but confirm that it is the kernel and not something else
+        # e.g. case of rebooted, pid file still exists, different process now
+        cmd = subprocess.check_output(["ps", "-w", "-w", "p", str(pid), "-o", "cmd", "h"]).decode()
+        kernel_exists = connection_file_path in cmd and 'jupyter-kernel' in cmd
 else:
     kernel_exists = False    
 
