@@ -57,7 +57,11 @@ for i, (a, b) in enumerate(pairs):
 
 ,python "x=1"
 ,python "print(x)"
+# This also shows the repr():
 ,python "x"
+
+# also ipython magic commands work, e.g.
+,python "files = !ls"
 ```
 
 
