@@ -1,0 +1,212 @@
+#!/bin/python
+
+import os
+import signal
+import subprocess
+import sys
+import select
+import jupyter_client
+from time import sleep
+
+usage = """# Usage:
+
+Execute command (and start a kernel if one isn't running):
+    ,python [command]
+
+Kill running kernel:
+    ,python --kill
+
+New kernel (and kill any existing):
+    ,python --new
+
+New kernel (and kill any existing) and execute command:
+    ,python --new [command]
+
+
+# Notes:
+
+- if stdin is provided, it is assigned to `stdin`,
+    along with `lines = stdin.splitlines()`
+- you could also `jupyter console --existing shell_kernel.json`,
+    but then you won't maintain the history in your shell
+- in fish, recommend using Alt+E to edit your ,python command!
+    ...an experience a little bit closer to a Notebook cell or QtConsole prompt
+    Try with this micro editor config:
+        set -U EDITOR "micro -wordwrap true -softwrap true -autosave 9999999"
+    with the benefits of a mouse and Ctrl+C & Ctrl+V in micro.
+    where Ctrl+Q exits with the command changes saved automatically
+
+
+# Examples:
+
+```
+,python "import numpy as np"
+
+ls -1t | ,python "
+jpgs = [x for x in lines if x.endswith('.jpg')]
+pairs = np.array(jpgs[:len(jpgs) // 2 * 2]).reshape((-1, 2))
+for i, (a, b) in enumerate(pairs):
+    print(f'{i=}, {a=}, {b=}')
+"
+
+,python "print(f'{i=}, {a=}, {b=}')"
+
+,python "for i, (a, b) in enumerate(pairs):
+    print(f'{i=}, {a=}, {b=}')
+" | grep "i=3"
+
+,python "x=1"
+,python "print(x)"
+,python "x"
+```
+
+
+# Bugs:
+
+- Sometimes after creating a new kernel, calling km.execute(to_execute) immediately never results in a km.iopub_channel.msg_ready() returing True.
+    - This can be hard to debug because it tends to only get stuck NOT using the debugger.
+    - A reproducer that seems to work with a debugger sometimes is `,python --new "import numpy as np"`
+    - The current workaround is a sleep(1) after creating a new kernel
+    - Another workaround is to only create kernels with `,python --new` without another argument for a command.
+- jupyter kernel process doesn't exit after kernel is shutdown #941
+    - https://github.com/jupyter/jupyter_client/issues/941
+    - workaround is to store the pid and os.kill it manually
+
+
+# Requirements (tested with):
+
++ jupyter_client == 8.0.3
+
+"""
+
+to_execute = None
+kill = False
+restart = False
+
+try:
+    arg = sys.argv[1]
+    if arg in ['-h', '--help']:
+        print(usage)
+        exit(0)
+    elif arg == '--kill':
+        kill = True
+    elif arg == '--new':
+        restart = True
+        try:
+            to_execute = sys.argv[2]
+        except:
+            pass
+    else:
+        to_execute = arg
+except SystemExit:
+    pass
+except:
+    print(usage)
+    exit(1)
+
+connection_file = 'shell_kernel.json'
+pid_file = 'shell_kernel.pid'
+runtime_path = os.path.expanduser('~/.local/share/jupyter/runtime/')
+connection_file_path = os.path.join(runtime_path, connection_file)
+connection_pid_path =  os.path.join(runtime_path, pid_file)
+
+if os.path.exists(connection_pid_path):
+    with open(connection_pid_path) as f:
+        pid = int(f.read().strip())
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        kernel_exists = False
+    else:
+        kernel_exists = True
+else:
+    kernel_exists = False    
+
+if kill or restart:
+    if kernel_exists:
+        os.kill(pid, signal.SIGKILL)
+        print(f"Killed kernel with pid {pid}", file=sys.stderr)
+        kernel_exists = False
+    else:
+        print("No kernel found to kill", file=sys.stderr)
+
+if not kernel_exists and os.path.exists(connection_file_path):
+    os.remove(connection_file_path)
+if not kernel_exists and os.path.exists(connection_pid_path):
+    os.remove(connection_pid_path)
+
+if kill:
+    sys.exit(0)
+
+if not kernel_exists:
+    cf_arg = '--KernelManager.connection_file=' + connection_file_path
+    proc = subprocess.Popen(['jupyter', 'kernel', cf_arg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    pid = str(proc.pid)
+    print(f"Started kernel with pid {pid}", file=sys.stderr)
+    with open(connection_pid_path, 'w') as f:
+        f.write(pid)
+    
+    # HACK to avoid km.iopub_channel.msg_ready() indefinitely False
+    sleep(1)
+
+if to_execute is None:
+    exit(0)
+
+# Inspiration from https://stackoverflow.com/a/35792945
+
+cf = None
+max_try = 10
+i = 0
+while True:
+    try:
+        cf = jupyter_client.find_connection_file(connection_file_path)
+        break
+    except:
+        i += 1
+        sleep(0.2)
+        if i >= max_try:
+            print("Couldn't find connection file")
+            sys.exit(1)
+
+km = jupyter_client.BlockingKernelClient(connection_file=cf)
+km.load_connection_file()
+
+
+def exec_km(to_execute):
+    km.execute(to_execute)
+
+    wait_for_idle = True
+    busy_seen = False
+    while wait_for_idle:
+        if km.iopub_channel.msg_ready():
+            msg = km.iopub_channel.get_msg()
+            if 'content' not in msg:
+                continue
+            content = msg['content']
+            if 'execution_state' in content:
+                if content['execution_state'] == 'busy':
+                    busy_seen = True
+                if content['execution_state'] == 'idle' and busy_seen:
+                    wait_for_idle = False
+            if 'name' in content and 'text' in content:
+                name = content['name']
+                text = content['text']
+                if name == 'stdout':
+                    print(text, end='')
+                elif name == 'stderr':
+                    print(text, end='', file=sys.stderr)
+            if 'data' in content:
+                for d in content['data'].values():
+                    print(d)
+            if 'traceback' in content:
+                for t in content['traceback']:
+                    print(t, file=sys.stderr)
+
+
+if select.select([sys.stdin, ], [], [], 0.0)[0]:
+    from_stdin = sys.stdin.read()
+    # TODO what's the right way to pipe data into a kernel?
+    exec_km('stdin = ' + from_stdin.__repr__()) 
+    exec_km('lines = stdin.splitlines()')
+
+exec_km(to_execute)
