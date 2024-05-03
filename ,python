@@ -22,6 +22,9 @@ New kernel (and kill any existing):
 New kernel (and kill any existing) and execute command:
     ,python --new [command]
 
+Jump into ipython shell of existing kernel:
+    ,python --shell
+
 """
 
 to_execute = None
@@ -41,6 +44,12 @@ try:
             to_execute = sys.argv[2]
         except:
             pass
+    elif arg in ['--shell', '--console']:
+        os.system('jupyter console --existing shell_kernel.json')
+        sys.exit(0)
+    elif arg in ['--qtconsole']:
+        os.system('jupyter qtconsole --existing shell_kernel.json')
+        sys.exit(0)
     else:
         to_execute = arg
 except SystemExit:
@@ -100,7 +109,7 @@ if not kernel_exists:
         f.write(pid)
     is_new_kernel = True
     # HACK to avoid km.iopub_channel.msg_ready() indefinitely False
-    sleep(1)
+    # sleep(1)
 
 # Find the connection file, waiting max 2 seconds before exit(1)
 cf = None
@@ -184,8 +193,20 @@ if not get_messages(km):
 # On first run of a new kernel, you may want to execute certain lines
 # e.g. `import os`, `import my_library`, or even `%pylab`
 if is_new_kernel:
-    # msgs = exec_km('%pylab')
-    pass
+    # exec_km('%pylab')
+    exec_km("""
+import os
+import re
+_quit = quit
+def quit():
+    _quit(keep_kernel=True)
+exit = quit
+""")
+    # _quit = quit
+    # def quit():
+    #     _quit(keep_kernel=True)
+    # print(dir(km))
+    # km.shell.push({'_quit' : _quit, 'quit' : quit, 'exit' : quit})
 
 if to_execute is None:
     exit(0)
