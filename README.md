@@ -23,6 +23,15 @@ New kernel (and kill any existing) and execute command:
 ,python --new [command]
 ```
 
+Jump into an console of the current kernel:
+```
+# for an ipython-like console in your terminal
+,python --console
+
+# for a graphical qt cosnole
+,python --qtconsole
+```
+
 # Notes:
 
 If stdin is provided, it is assigned to `stdin`, along with `lines = stdin.splitlines()`.
